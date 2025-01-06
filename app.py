@@ -6,9 +6,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from config import Config
 import joblib
 import pandas as pd
+from flask_cors import CORS
 
 
 app = Flask(__name__)
+
+CORS(app)
 
 app.config.from_object(Config)
 jwt = JWTManager(app)
@@ -103,6 +106,7 @@ def all_predicts():
         sql_query = """
             SELECT predicts.*, users.name, users.email FROM predicts
             INNER JOIN users ON predicts.user_id = users.id
+            ORDER BY predicts.created_at DESC
         """
         cursor.execute(sql_query)
         allAuto = [
@@ -117,19 +121,22 @@ def all_predicts():
                 bmi=row['bmi'],
                 hbac=row['hbac'],
                 blood_glucose=row['blood_glucose'],
-                diabetes=row['diabetes'])
+                diabetes=row['diabetes'],
+                created_at=row['created_at'])
                 for row in cursor.fetchall()
         ]
         if allAuto is not None :
-            return jsonify({'success': True, 'data': allAuto}), 200
+            return jsonify({'success': True, 'payload': allAuto}), 200
 
     
     if request.method == 'POST':
         email = get_jwt_identity()
+        print(email)
         cursor.execute(
             "SELECT * FROM users WHERE email = %s", (email)
         )
         user = cursor.fetchone()
+        print(user)
 
         data = request.json
         user_id = user['id']
@@ -155,9 +162,19 @@ def all_predicts():
         }
         new_data_df = pd.DataFrame(features)
         new_data_encoded = pd.get_dummies(new_data_df)
-        prediction = model.predict([new_data_encoded])  # Make a prediction
 
-        diabetes = prediction[0]
+        X_train_encoded = [
+            'age', 'hypertension', 'heart_disease', 'bmi', 'HbA1c_level',
+            'blood_glucose_level', 'gender_Female', 'gender_Male', 'gender_Other',
+            'smoking_history_No Info', 'smoking_history_current',
+            'smoking_history_ever', 'smoking_history_former',
+            'smoking_history_never', 'smoking_history_not current'
+        ]
+        new_data_encoded = new_data_encoded.reindex(columns=X_train_encoded, fill_value=0)
+
+        prediction = model.predict(new_data_encoded)  # Make a prediction
+
+        diabetes = int(prediction[0])
 
         sql = """ 
             INSERT INTO predicts (
@@ -187,5 +204,7 @@ def all_predicts():
             diabetes
         ))
         conn.commit()
-        return jsonify({'success': True, 'message': "created successfully"}), 201
+        return jsonify({'success': True, 'message': "created successfully", "is_diabetes": diabetes}), 201
     
+if __name__ == '__main__' :
+    app.run(debug=True)
